@@ -1,162 +1,66 @@
+from threading import Thread
+from queue import Queue
+from os import makedirs
 from os.path import isdir
-from os import makedirs as makedir
-from time import sleep
-import Watcher
-
-w = Watcher.w
-
-DIR = 'NBWatch'
-
-regions = '''
-    North America = 1
-    Latin America North = 2
-    Latin America South = 3
-    Europe West = 4
-    Europe East = 5
-    Oceania = 6
-    Korea = 7
-    Russia = 8
-    Turkey = 9
-    Brazil = 10
-    '''
-
-regionlist  = {
-    1:'na',
-    2:'lan',
-    3:'las',
-    4:'euw',
-    5:'eune',
-    6:'oce',
-    7:'kr',
-    8:'ru',
-    9:'tr',
-    10:'br'
-    }
+import GetSummoners
 
 
-def wait_for_request(delay=1):
-    while not w.can_make_request():
-        sleep(delay)
+class QueueWorker(Thread):
+    def __init__(self, queue, funct):
+        Thread.__init__(self)
+        self.queue = queue
+        self.funct = funct
 
-def updateSummoner(summonername, rg, summonerid = None):
-    if rg == '':
-        rg = 1
-    try:
-        rg = regionlist[int(rg)]
-        DIR = 'NBWatch\\'+rg
-    except Exception as e:
-        print('Region {0} error: {1}'.format(rg, e))
-    if not isdir(DIR):
-        makedir(DIR)
-    wait_for_request()
-    # Get summoner info
-    try:
-        summoner = w.get_summoner(name=summonername, region = rg)
-    except Exception:
-        print(summonername, rg)
-    SID = str(summoner['id'])
-    if not isdir(DIR+'\\'+SID):
-        makedir(DIR+'\\'+SID)
-    wait_for_request()
-    with open(DIR+'\\'+SID+'\\summonername.txt', 'w') as f:
-        f.write(str(summonername))
-    # Get summoner's mastery pages
-    mastery_pages = w.get_mastery_pages(SID, region = rg)
-    with open(DIR+'\\'+SID+'\\masteries.txt', 'w') as f:
-        f.write(str(mastery_pages))
-    wait_for_request()
+    def run(self):
+        while True:
+            try:
+                if not self.queue.empty():
+                    parts = self.queue.get()
+                    self.funct(parts)
+                    del parts
+                    print('solved')
+            except:
+                self.queue.put(parts)
 
-    # Get summoner's rune pages
-    rune_pages = w.get_rune_pages(SID, rg)
-    with open(DIR+'\\'+SID+'\\runes.txt', 'w') as f:
-        f.write(str(rune_pages))
-    wait_for_request()
 
-    # Get summoner's current ranked stats
-    try:
-        ranked = w.get_ranked_stats(SID, region =  rg)
-        with open(DIR+'\\'+SID+'\\ranked.txt', 'w') as f:
-            f.write(str(ranked))
-    except Exception as e:
-        print('{0}, {2} current season: {1}'.format(summonername, e, rg))
-    wait_for_request()
+def update_summoner(sumnames, region):
+    namelist = []
+    namelist.extend(sumnames)
+    summoners = GetSummoners.get_summoners_info(namelist, region)
+    ids = [sumid for sumid in summoners]
+    for sumid in ids:
+        info_queue.put((sumid, region, summoners[sumid]))
 
-    # Get summoner's season x ranked stats
-    for x in range(1,5):
-        try:
-            ranked_season_x = w.get_ranked_stats(SID, season = x, region =  rg)
-            with open(DIR+'\\'+SID+'\\ranked_s'+str(x)+'.txt', 'w') as f:
-                f.write(str(ranked_season_x))
-        except Exception as e:
-            print('{0} Season {1}: {2}'.format(summonername, x, e))
-#sn = input('Summoner Name: ')
-#print(regions)
-#rn = input('Input a region number:')
-#updateSummoner(sn, rn, True)
-def update_all_sums(rg=10, debug=False, delay=2):
-    a=0
-    while True:
-        try:
-            sl=[]
-            for x in range(30):
-                sl.append(str(a))
-                a+=1
-            summonernames = w.get_summoner_name(sl,region=regionlist[int(rg)])
-            for x,y in summonernames.items():
-                summonername=y
-                rgn = regionlist[int(rg)]
-                DIR = 'NBWatch\\'+rgn
-                if not isdir(DIR):
-                    makedir(DIR)
-                wait_for_request()
-                # Get summoner info
-                try:
-                    summoner = w.get_summoner(name=summonername, region = rgn)
-                except Exception:
-                    print(rgn, summonername)
-                SID = str(summoner['id'])
-                if not isdir(DIR+'\\'+SID):
-                    makedir(DIR+'\\'+SID)
-                wait_for_request()
-                with open(DIR+'\\'+SID+'\\summonername.txt', 'w') as f:
-                    f.write(str(summonername))
-                # Get summoner's mastery pages
-                sleep(1)
-                mastery_pages = w.get_mastery_pages(SID, region = rgn)
-                with open(DIR+'\\'+SID+'\\masteries.txt', 'w') as f:
-                    f.write(str(mastery_pages))
-                wait_for_request()
-                # Get summoner's rune pages
-                sleep(1)
-                rune_pages = w.get_rune_pages(SID, rgn)
-                with open(DIR+'\\'+SID+'\\runes.txt', 'w') as f:
-                    f.write(str(rune_pages))
-                if debug == True:
-                    print('{2}, {0}, {1} runes: Pass'.format(summonername, rgn, SID))
-                wait_for_request()
+def write_info(suminfo):
+    #sumid, region, sumname, sumlvl, sumicon, masteries, runes
+    sumid, region, suminfo = suminfo
+    basicinfo = suminfo['name'], suminfo['level'], suminfo['iconid']
+    del suminfo['name'], suminfo['level'], suminfo['iconid']
+    sumdir = '{0}\\{1}\\{2}\\'.format(defdir, GetSummoners.regions[region], sumid)
+    confirm_directory(sumdir)
+    del sumid, region
 
-                # Get summoner's current ranked stats
-                sleep(1)
-                try:
-                    ranked = w.get_ranked_stats(SID, region =  rgn)
-                    with open(DIR+'\\'+SID+'\\ranked.txt', 'w') as f:
-                        f.write(str(ranked))
-                except Exception as e:
-                    print('{3}, {0}, {2} current season: {1}'.format(summonername, e, rgn, SID))
+    with open(sumdir+'basicinfo.lsa', 'w+') as basicfile:
+        basicfile.writelines([str(line)+'\n' for line in basicinfo])
+    del basicinfo
 
-                # Get summoner's season x ranked stats
-                for x in range(1,5):
-                    sleep(1)
-                    wait_for_request()
-                    try:
-                        ranked_season_x = w.get_ranked_stats(SID, season = x, region =  rgn)
-                        with open(DIR+'\\'+SID+'\\ranked_s'+str(x)+'.txt', 'w') as f:
-                            f.write(str(ranked_season_x))
-                    except Exception as e:
-                        print('{3}, {0} Season {1}: {2}'.format(summonername, x, e, SID))
-        except Exception as e:
-            with open('errors.txt', 'a') as f:
-                f.write('NA, error:')
-                f.write(str(e))
-                f.write('\n')
-update_all_sums(rg=1)
+    with open(sumdir+'masteries.lmf', 'w+') as masteryfile:
+        masteryfile.write(str(suminfo['masteries']))
+    del suminfo['masteries']
+
+    with open(sumdir+'runes.lrf', 'w+') as runefile:
+        runefile.write(str(suminfo['runes']))
+    del suminfo
+
+
+def confirm_directory(directory):
+    if not isdir(directory):
+        makedirs(directory)
+
+defdir = 'watchdata'
+
+info_queue = Queue()
+info_worker = QueueWorker(info_queue, write_info)
+info_worker.start()
+
+update_summoner(['Meowpai', 'LtSmokerV2', 'Zalestus', 'LEPReconBen', 'Zachary Scuderi'], 1)
